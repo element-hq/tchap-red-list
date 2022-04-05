@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-from typing import Any, Dict, Optional, Tuple
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import attr
 from synapse.module_api import (
@@ -24,6 +25,7 @@ from synapse.module_api import (
     cached,
     run_in_background,
 )
+from synapse.module_api.errors import ConfigError, SynapseError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ ACCOUNT_DATA_TYPE = "im.vector.hide_profile"
 @attr.s(auto_attribs=True, frozen=True)
 class RedListManagerConfig:
     discovery_room: Optional[str] = None
+    use_email_account_validity: bool = False
 
 
 class RedListManager:
@@ -59,6 +62,12 @@ class RedListManager:
             # the table to be accessed before it's fully created.
             run_in_background(self._setup_db)
 
+        if self._config.use_email_account_validity:
+            self._api.looping_background_call(self._add_expired_users, 60 * 60 * 1000)
+            self._api.looping_background_call(
+                self._remove_renewed_users, 60 * 60 * 1000
+            )
+
     @staticmethod
     def parse_config(config: Dict[str, Any]) -> RedListManagerConfig:
         return RedListManagerConfig(**config)
@@ -79,13 +88,19 @@ class RedListManager:
         # Compare what status (in the list, not in the list) the user wants to have with
         # what it already has. If they're the same, don't do anything more.
         desired_status = bool(content.get("hide_profile"))
-        current_status, _ = await self._get_user_status(user_id)
+        current_status, because_expired = await self._get_user_status(user_id)
 
-        if current_status == desired_status:
+        # If the user's desired status is the same as their current one, don't do
+        # anything, except if because_expired is True (because in this case it can be a
+        # user that was added to the red list after expiring, haven't been removed yet,
+        # and manually re-added themselves).
+        if current_status == desired_status and because_expired is False:
             return
 
-        # Add or remove the user depending on whether they want their profile hidden.
-        if desired_status is True:
+        # Update the red list depending on whether the user wants their profile hidden.
+        if because_expired is True:
+            await self._update_added_after_expiring(user_id)
+        elif desired_status is True:
             await self._add_to_red_list(user_id)
         else:
             await self._remove_from_red_list(user_id)
@@ -119,8 +134,125 @@ class RedListManager:
         user_in_red_list, _ = await self._get_user_status(user_profile["user_id"])
         return user_in_red_list
 
+    async def _add_expired_users(self) -> None:
+        """Retrieve all expired users and adds them to the red list."""
+
+        def add_expired_users_txn(txn: LoggingTransaction) -> List[str]:
+            # Retrieve all the expired users.
+            sql = """
+            SELECT user_id FROM email_account_validity WHERE expiration_ts_ms <= ?
+            """
+
+            now_ms = int(time.time() * 1000)
+            txn.execute(sql, (now_ms,))
+            expired_users_rows = txn.fetchall()
+
+            expired_users = [row[0] for row in expired_users_rows]
+
+            # Figure out which users are in the red list.
+            # We could also inspect the cache on self._get_user_status and only query the
+            # status of the users that aren't cached, but
+            #   1) it's probably digging too much into Synapse's internals (i.e. it could
+            #      easily break without warning)
+            #   2) it's not clear that there would be such a huge perf gain from doing
+            #      things this way.
+            red_list_users_rows = DatabasePool.simple_select_many_txn(
+                txn=txn,
+                table="tchap_red_list",
+                column="user_id",
+                iterable=expired_users,
+                keyvalues={},
+                retcols=["user_id"],
+            )
+
+            # Figure out which users we need to add to the red list by looking up whether
+            # they're already in it.
+            users_in_red_list = [row["user_id"] for row in red_list_users_rows]
+            users_to_add = [
+                user for user in expired_users if user not in users_in_red_list
+            ]
+
+            # Add all the expired users not in the red list.
+            sql = """
+            INSERT INTO tchap_red_list(user_id, because_expired) VALUES(?, ?)
+            """
+            for user in users_to_add:
+                txn.execute(sql, (user, True))
+                self._get_user_status.invalidate((user,))
+
+            return users_to_add
+
+        users_added = await self._api.run_db_interaction(
+            "tchap_red_list_hide_expired_users",
+            add_expired_users_txn,
+        )
+
+        # Make the expired users leave the discovery room if there's one.
+        for user in users_added:
+            await self._maybe_change_membership_in_discovery_room(user, "leave")
+
+    async def _remove_renewed_users(self) -> None:
+        """Remove users from the red list if they have been added by _add_expired_users
+        and have since then renewed their account.
+        """
+
+        def remove_renewed_users_txn(txn: LoggingTransaction) -> List[str]:
+            # Retrieve the list of users we have previously added because their account
+            # expired.
+            rows = DatabasePool.simple_select_list_txn(
+                txn=txn,
+                table="tchap_red_list",
+                keyvalues={"because_expired": True},
+                retcols=["user_id"],
+            )
+
+            previously_expired_users = [row["user_id"] for row in rows]
+
+            # Among these users, figure out which ones are still expired.
+            rows = DatabasePool.simple_select_many_txn(
+                txn=txn,
+                table="email_account_validity",
+                column="user_id",
+                iterable=previously_expired_users,
+                keyvalues={},
+                retcols=["user_id", "expiration_ts_ms"],
+            )
+
+            renewed_users: List[str] = []
+            now_ms = int(time.time() * 1000)
+            for row in rows:
+                if row["expiration_ts_ms"] > now_ms:
+                    renewed_users.append(row["user_id"])
+
+            # Remove the users who aren't expired anymore.
+            DatabasePool.simple_delete_many_txn(
+                txn=txn,
+                table="tchap_red_list",
+                column="user_id",
+                values=renewed_users,
+                keyvalues={},
+            )
+
+            for user in renewed_users:
+                self._get_user_status.invalidate((user,))
+
+            return renewed_users
+
+        users_removed = await self._api.run_db_interaction(
+            "tchap_red_list_remove_renewed_users",
+            remove_renewed_users_txn,
+        )
+
+        # Make the renewed users re-join the discovery room if there's one.
+        for user in users_removed:
+            await self._maybe_change_membership_in_discovery_room(user, "join")
+
     async def _setup_db(self) -> None:
-        """Create the table needed to store the red list data."""
+        """Create the table needed to store the red list data.
+
+        If the module is configured to interact with the email account validity module,
+        also check that the table exists.
+        """
 
         def setup_db_txn(txn: LoggingTransaction) -> None:
             sql = """
@@ -130,6 +262,15 @@ class RedListManager:
             );
             """
             txn.execute(sql, ())
+
+            if self._config.use_email_account_validity:
+                try:
+                    txn.execute("SELECT * FROM email_account_validity LIMIT 0", ())
+                except SynapseError:
+                    raise ConfigError(
+                        "use_email_account_validity is set but no email account validity"
+                        " database table found."
+                    )
 
         await self._api.run_db_interaction(
             "tchap_red_list_setup_db",
@@ -164,6 +305,36 @@ class RedListManager:
 
         # If there is a room used for user discovery, make them leave it.
         await self._maybe_change_membership_in_discovery_room(user_id, "leave")
+
+    async def _update_added_after_expiring(self, user_id: str) -> None:
+        """Update a user's entry into the red list to set the because_expired boolean to
+        false.
+
+        We need this because there can be a delay between the user renewing their account
+        (from an account validity perspective) and the module actually picking up the
+        renewal, during which the user might decide to add their profile to the red list.
+
+        In this case, we set because_expired to false for the user, which will cause the
+        job that removes unexpired accounts from the red list to ignore them.
+
+        Args:
+            user_id: the user to update.
+        """
+
+        def update_added_after_expiring_txn(txn: LoggingTransaction) -> None:
+            DatabasePool.simple_update_one_txn(
+                txn=txn,
+                table="tchap_red_list",
+                keyvalues={"user_id": user_id},
+                updatevalues={"because_expired": False},
+            )
+
+            self._get_user_status.invalidate((user_id,))
+
+        await self._api.run_db_interaction(
+            "tchap_red_list_update_added_after_expiring",
+            update_added_after_expiring_txn,
+        )
 
     async def _remove_from_red_list(self, user_id: str) -> None:
         """Remove the given user from the red list.
@@ -216,7 +387,7 @@ class RedListManager:
             if row is None:
                 return False, False
 
-            return True, row["because_expired"]
+            return True, bool(row["because_expired"])
 
         return await self._api.run_db_interaction(
             "tchap_red_list_get_status",
