@@ -36,7 +36,7 @@ class SQLiteStore:
     async def run_db_interaction(
         self, desc: str, f: Callable[..., RV], *args: Any, **kwargs: Any
     ) -> RV:
-        cur = self.conn.cursor()
+        cur = CursorWrapper(self.conn.cursor())
         try:
             res = f(cur, *args, **kwargs)
             self.conn.commit()
@@ -44,6 +44,41 @@ class SQLiteStore:
         except Exception:
             self.conn.rollback()
             raise
+
+
+class MockEngine:
+    supports_using_any_list = False
+
+
+class CursorWrapper:
+    """Wrapper around a SQLite cursor."""
+
+    def __init__(self, cursor: sqlite3.Cursor) -> None:
+        self.cur = cursor
+        self.database_engine = MockEngine()
+
+    def execute(self, sql: str, args: Any) -> None:
+        self.cur.execute(sql, args)
+
+    @property
+    def description(self) -> Any:
+        return self.cur.description
+
+    @property
+    def rowcount(self) -> Any:
+        return self.cur.rowcount
+
+    def fetchone(self) -> Any:
+        return self.cur.fetchone()
+
+    def fetchall(self) -> Any:
+        return self.cur.fetchall()
+
+    def __iter__(self) -> Any:
+        return self.cur.__iter__()
+
+    def __next__(self) -> Any:
+        return self.cur.__next__()
 
 
 def make_awaitable(result: TV) -> Awaitable[TV]:
@@ -59,15 +94,16 @@ def make_awaitable(result: TV) -> Awaitable[TV]:
 
 async def create_module(
     config: Optional[JsonDict] = None,
-) -> Tuple[RedListManager, Mock]:
+) -> Tuple[RedListManager, Mock, SQLiteStore]:
     """Create an instance of the module.
 
     Args:
         config: the config to give the module, if any.
 
     Returns:
-        The instance of the module and the mock for the module API so the tests can check
-        its calls.
+        The instance of the module, the mock for the module API so the tests can check
+        its calls, and the store used by the module so the test can e.g. maintain a dummy
+        account validity table.
     """
     store = SQLiteStore()
 
@@ -91,4 +127,4 @@ async def create_module(
     # call history.
     module_api.run_db_interaction.reset_mock()
 
-    return module, module_api
+    return module, module_api, store

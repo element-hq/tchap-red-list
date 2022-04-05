@@ -28,7 +28,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
         """Tests that incoming account data with a different account data type than the
         one the module handles is ignored.
         """
-        module, api = await create_module()
+        module, api, _ = await create_module()
 
         account_data_type = "org.matrix.foo"
 
@@ -74,7 +74,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
 
     async def test_status_cached(self) -> None:
         """Tests that users statuses are correctly cached and invalidated."""
-        module, api = await create_module()
+        module, api, _ = await create_module()
 
         # Get the user's status and check we made a database call.
         in_list, _ = await module._get_user_status(self.user_id)
@@ -118,7 +118,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
 
     async def test_add_to_list_no_discovery(self) -> None:
         """Tests adding a user to the red list (with no discovery room)"""
-        module, api = await create_module()
+        module, api, _ = await create_module()
 
         await module.update_red_list_status(
             user_id=self.user_id,
@@ -159,7 +159,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
     async def test_add_to_list_discovery(self) -> None:
         """Tests adding a user to the red list (with a discovery room)"""
         room_id = "!someroom:test"
-        module, api = await create_module({"discovery_room": room_id})
+        module, api, _ = await create_module({"discovery_room": room_id})
 
         await module.update_red_list_status(
             user_id=self.user_id,
@@ -220,7 +220,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
         Returns:
             The return values from create_module.
         """
-        module, api = await create_module(config)
+        module, api, _ = await create_module(config)
         await module._add_to_red_list(self.user_id)
         # Reset the mocks, so the action we just performed doesn't interfere with the
         # call counts.
