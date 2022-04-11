@@ -1,6 +1,6 @@
 # "Red list" module for Tchap
 
-Hide users from user search on demand.
+This module allows user to hide themselves from user search.
 
 Users are expected to be in a single room, hidden from clients, to help user discovery
 across a closed federation. When users update their global `im.vector.hide_profile`
@@ -21,7 +21,7 @@ Then alter your homeserver configuration, adding to your `modules` configuration
 modules:
   - module: tchap_red_list.RedListManager
     config:
-      # Room used for user discovery.
+      # ID of the room used for user discovery.
       # Optional, defaults to no room.
       discovery_room: "!someroom:example.com"
 ```

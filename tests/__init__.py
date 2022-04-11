@@ -60,6 +60,15 @@ def make_awaitable(result: TV) -> Awaitable[TV]:
 async def create_module(
     config: Optional[JsonDict] = None,
 ) -> Tuple[RedListManager, Mock]:
+    """Create an instance of the module.
+
+    Args:
+        config: the config to give the module, if any.
+
+    Returns:
+        The instance of the module and the mock for the module API so the tests can check
+        its calls.
+    """
     store = SQLiteStore()
 
     # Create a mock based on the ModuleApi spec, but override some mocked functions

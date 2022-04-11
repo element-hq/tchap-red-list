@@ -54,6 +54,9 @@ class RedListManager:
 
         if setup_db:
             # Set up the storage layer
+            # We run this in the background because there's no other way to run async code
+            # in __init__. However, this means we might have a race if something causes
+            # the table to be accessed before it's fully created.
             run_in_background(self._setup_db)
 
     @staticmethod
