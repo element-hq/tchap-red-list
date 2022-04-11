@@ -95,7 +95,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
             account_data_type=ACCOUNT_DATA_TYPE,
             content={"hide_profile": True},
         )
-        # Reset the mock so that the database call from update_red_list_status don't
+        # Reset the mock so that the database call from update_red_list_status doesn't
         # interfere.
         api.run_db_interaction.reset_mock()
         in_list, _ = await module._get_user_status(self.user_id)
@@ -109,7 +109,7 @@ class RedListTestCase(aiounittest.AsyncTestCase):
             account_data_type=ACCOUNT_DATA_TYPE,
             content={"hide_profile": False},
         )
-        # Reset the mock so that the database call from update_red_list_status don't
+        # Reset the mock so that the database call from update_red_list_status doesn't
         # interfere.
         api.run_db_interaction.reset_mock()
         in_list, _ = await module._get_user_status(self.user_id)

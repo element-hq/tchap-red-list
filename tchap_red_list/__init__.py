@@ -75,7 +75,7 @@ class RedListManager:
 
         # Compare what status (in the list, not in the list) the user wants to have with
         # what it already has. If they're the same, don't do anything more.
-        desired_status = content.get("hide_profile") or False
+        desired_status = bool(content.get("hide_profile"))
         current_status, _ = await self._get_user_status(user_id)
 
         if current_status == desired_status:
@@ -142,8 +142,8 @@ class RedListManager:
 
         Args:
             user_id: the user to add to the red list.
-            because_expired: whether the user is being added as a result of a change in
-                their account validity status.
+            because_expired: whether the user is being added as a result of their
+                account expiring.
         """
 
         def _add_to_red_list_txn(txn: LoggingTransaction) -> None:
