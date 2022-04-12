@@ -1,7 +1,11 @@
 # "Red list" module for Tchap
 
-Hide users from user search on demand.
+This module allows users to hide themselves from user search.
 
+Users are expected to be in a single room, hidden from clients, to help user discovery
+across a closed federation. When users update their global `im.vector.hide_profile`
+account data with `{"hide_profile": True}`, they are removed from this discovery room,
+and added to a local database table to filter them out from local results.
 
 ## Installation
 
@@ -17,7 +21,9 @@ Then alter your homeserver configuration, adding to your `modules` configuration
 modules:
   - module: tchap_red_list.RedListManager
     config:
-      # TODO: Complete this section with an example for your module
+      # ID of the room used for user discovery.
+      # Optional, defaults to no room.
+      discovery_room: "!someroom:example.com"
 ```
 
 
@@ -73,14 +79,4 @@ Synapse developers (assuming a Unix-like shell):
  6. Push the tag.
     ```shell
     git push origin tag v$version
-    ```
-
- 7. If applicable:
-    Create a *release*, based on the tag you just pushed, on GitHub or GitLab.
-
- 8. If applicable:
-    Create a source distribution and upload it to PyPI:
-    ```shell
-    python -m build
-    twine upload dist/tchap_red_list-$version*
     ```
