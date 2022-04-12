@@ -1,6 +1,6 @@
 # "Red list" module for Tchap
 
-This module allows user to hide themselves from user search.
+This module allows users to hide themselves from user search.
 
 Users are expected to be in a single room, hidden from clients, to help user discovery
 across a closed federation. When users update their global `im.vector.hide_profile`
