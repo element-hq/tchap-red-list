@@ -90,13 +90,6 @@ class RedListManager:
         desired_status = bool(content.get("hide_profile"))
         current_status, because_expired = await self._get_user_status(user_id)
 
-        # If the user's desired status is the same as their current one, don't do
-        # anything, except if because_expired is True (because in this case it can be a
-        # user that was added to the red list after expiring, haven't been removed yet,
-        # and manually re-added themselves).
-        if current_status == desired_status and because_expired is False:
-            return
-
         if current_status == desired_status:
             if because_expired is True:
                 # There can be a delay between the user renewing their account (from an
