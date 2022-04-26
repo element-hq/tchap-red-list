@@ -7,6 +7,11 @@ across a closed federation. When users update their global `im.vector.hide_profi
 account data with `{"hide_profile": True}`, they are removed from this discovery room,
 and added to a local database table to filter them out from local results.
 
+This module can also interact with the [synapse-email-account-validity](https://github.com/matrix-org/synapse-email-account-validity)
+module. If this compatibility feature is enabled, the module will automatically scan for
+expired and renewed users every hour. It will then add expired users to the red list and
+remove renewed users from it (without updating the users' account data).
+
 ## Installation
 
 From the virtual environment that you use for Synapse, install this module with:
@@ -24,6 +29,9 @@ modules:
       # ID of the room used for user discovery.
       # Optional, defaults to no room.
       discovery_room: "!someroom:example.com"
+      # Whether to enable compatibility with the synapse-email-account-validity module.
+      # Optional, defaults to false.
+      use_email_account_validity: false
 ```
 
 

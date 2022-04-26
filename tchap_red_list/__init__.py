@@ -97,13 +97,21 @@ class RedListManager:
         if current_status == desired_status and because_expired is False:
             return
 
-        # Update the red list depending on whether the user wants their profile hidden.
-        if because_expired is True:
-            await self._update_added_after_expiring(user_id)
-        elif desired_status is True:
-            await self._add_to_red_list(user_id)
+        if current_status == desired_status:
+            if because_expired is True:
+                # There can be a delay between the user renewing their account (from an
+                # account validity perspective) and the module actually picking up the
+                # renewal, during which the user might decide to add their profile to the
+                # red list.
+                # In this case, we want to clear the because_expired flag so the user
+                # isn't removed from the red list next time we check account validity
+                # data.
+                await self._make_addition_permanent(user_id)
         else:
-            await self._remove_from_red_list(user_id)
+            if desired_status is True:
+                await self._add_to_red_list(user_id)
+            else:
+                await self._remove_from_red_list(user_id)
 
     async def _maybe_change_membership_in_discovery_room(
         self, user_id: str, membership: str
@@ -306,22 +314,15 @@ class RedListManager:
         # If there is a room used for user discovery, make them leave it.
         await self._maybe_change_membership_in_discovery_room(user_id, "leave")
 
-    async def _update_added_after_expiring(self, user_id: str) -> None:
-        """Update a user's entry into the red list to set the because_expired boolean to
-        false.
-
-        We need this because there can be a delay between the user renewing their account
-        (from an account validity perspective) and the module actually picking up the
-        renewal, during which the user might decide to add their profile to the red list.
-
-        In this case, we set because_expired to false for the user, which will cause the
-        job that removes unexpired accounts from the red list to ignore them.
+    async def _make_addition_permanent(self, user_id: str) -> None:
+        """Update a user's addition to the red list to make it permanent so it's not
+        removed automatically when the user renews their account.
 
         Args:
             user_id: the user to update.
         """
 
-        def update_added_after_expiring_txn(txn: LoggingTransaction) -> None:
+        def make_addition_permanent(txn: LoggingTransaction) -> None:
             DatabasePool.simple_update_one_txn(
                 txn=txn,
                 table="tchap_red_list",
@@ -332,8 +333,8 @@ class RedListManager:
             self._get_user_status.invalidate((user_id,))
 
         await self._api.run_db_interaction(
-            "tchap_red_list_update_added_after_expiring",
-            update_added_after_expiring_txn,
+            "tchap_red_list_make_addition_permanent",
+            make_addition_permanent,
         )
 
     async def _remove_from_red_list(self, user_id: str) -> None:
